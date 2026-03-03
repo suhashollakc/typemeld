@@ -1,9 +1,9 @@
 <p align="center">
   <img src="https://img.shields.io/npm/v/typemeld?style=flat-square&color=blue&label=npm" alt="npm version">
-  <img src="https://img.shields.io/npm/dm/typemeld?style=flat-square&color=green&label=downloads" alt="npm downloads">
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="license">
   <img src="https://img.shields.io/github/stars/suhashollakc/typemeld?style=flat-square&color=yellow" alt="stars">
-  <img src="https://img.shields.io/bundlephobia/minzip/typemeld?style=flat-square&color=orange&label=size" alt="bundle size">
-  <img src="https://img.shields.io/github/license/suhashollakc/typemeld?style=flat-square" alt="license">
+  <img src="https://img.shields.io/badge/dependencies-0-green?style=flat-square" alt="dependencies">
+  <img src="https://img.shields.io/badge/size-~3KB-orange?style=flat-square" alt="size">
 </p>
 
 <h1 align="center">typemeld</h1>
