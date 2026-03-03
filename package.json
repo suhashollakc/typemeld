@@ -1,0 +1,65 @@
+{
+  "name": "typemeld",
+  "version": "1.0.0",
+  "description": "Parse, validate, and repair messy LLM outputs into clean, typed data. Like zod for AI.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./repair": {
+      "types": "./src/repair.d.ts",
+      "import": "./src/repair.js"
+    },
+    "./schema": {
+      "types": "./src/schema.d.ts",
+      "import": "./src/schema.js"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/repair.test.js test/schema.test.js test/index.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "llm",
+    "ai",
+    "json",
+    "parser",
+    "validator",
+    "schema",
+    "openai",
+    "anthropic",
+    "gpt",
+    "claude",
+    "gemini",
+    "structured-output",
+    "zod",
+    "type-safe",
+    "json-repair",
+    "json-fix",
+    "ai-output",
+    "llm-output",
+    "coercion"
+  ],
+  "author": "Suhas Holla",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suhashollakc/typemeld.git"
+  },
+  "bugs": {
+    "url": "https://github.com/suhashollakc/typemeld/issues"
+  },
+  "homepage": "https://github.com/suhashollakc/typemeld#readme"
+}
