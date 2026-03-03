@@ -1,6 +1,6 @@
 {
   "name": "typemeld",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Parse, validate, and repair messy LLM outputs into clean, typed data. Like zod for AI.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
