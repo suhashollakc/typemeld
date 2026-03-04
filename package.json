@@ -1,6 +1,6 @@
 {
   "name": "typemeld",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Parse, validate, and repair messy LLM outputs into clean, typed data. Like zod for AI.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -17,10 +17,22 @@
     "./schema": {
       "types": "./src/schema.d.ts",
       "import": "./src/schema.js"
+    },
+    "./stream": {
+      "types": "./src/stream.d.ts",
+      "import": "./src/stream.js"
+    },
+    "./adapter": {
+      "types": "./src/adapter.d.ts",
+      "import": "./src/adapter.js"
+    },
+    "./retry": {
+      "types": "./src/retry.d.ts",
+      "import": "./src/retry.js"
     }
   },
   "scripts": {
-    "test": "node --test test/repair.test.js test/schema.test.js test/index.test.js",
+    "test": "node --test test/repair.test.js test/schema.test.js test/index.test.js test/stream.test.js test/adapter.test.js",
     "prepublishOnly": "npm test"
   },
   "keywords": [
@@ -42,7 +54,13 @@
     "json-fix",
     "ai-output",
     "llm-output",
-    "coercion"
+    "coercion",
+    "streaming",
+    "retry",
+    "zod-adapter",
+    "transform",
+    "langchain",
+    "vercel-ai"
   ],
   "author": "Suhas Holla",
   "license": "MIT",

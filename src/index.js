@@ -151,3 +151,6 @@ export class ParseError extends Error {
 // Re-exports
 export { repairJson, RepairError } from './repair.js';
 export { tm } from './schema.js';
+export { JsonStream, streamParse, parseStream } from './stream.js';
+export { fromZod } from './adapter.js';
+export { withRetry } from './retry.js';

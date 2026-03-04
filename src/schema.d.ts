@@ -58,6 +58,18 @@ export declare class Schema<T = any> {
   /** Maximum value (number), length (string), or count (array) */
   max(n: number): Schema<T>;
 
+  /** Custom error message for validation failures */
+  message(msg: string): Schema<T>;
+
+  /** Transform the value after validation succeeds */
+  transform<U>(fn: (value: T) => U): Schema<U>;
+
+  /** Add a custom refinement check that runs after validation */
+  refine(fn: (value: T) => boolean, messageOrOpts?: string | { message: string }): Schema<T>;
+
+  /** Preprocess the raw value before type validation */
+  preprocess(fn: (value: unknown) => unknown): Schema<T>;
+
   /** Validate a value against this schema */
   validate(value: any, path?: string): ValidationResult<T>;
 

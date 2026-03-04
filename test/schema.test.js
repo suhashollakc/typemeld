@@ -332,6 +332,122 @@ describe('Schema Builder (tm)', () => {
     });
   });
 
+  // ── Transform, Refine, Preprocess, Message ──
+
+  describe('.transform()', () => {
+    it('transforms value after validation', () => {
+      const s = tm.string().transform(v => v.toUpperCase());
+      const r = s.validate('hello');
+      assert.strictEqual(r.valid, true);
+      assert.strictEqual(r.value, 'HELLO');
+    });
+
+    it('chains multiple transforms', () => {
+      const s = tm.string().transform(v => v.trim()).transform(v => v.toLowerCase());
+      const r = s.validate('  HELLO  ');
+      assert.strictEqual(r.value, 'hello');
+    });
+
+    it('transform runs after coercion', () => {
+      const s = tm.number().transform(v => v * 2);
+      const r = s.validate('5');
+      assert.strictEqual(r.value, 10); // '5' coerced to 5, then doubled
+    });
+
+    it('does not run transform if validation fails', () => {
+      let called = false;
+      const s = tm.number().transform(v => { called = true; return v; });
+      s.validate('not a number');
+      assert.strictEqual(called, false);
+    });
+  });
+
+  describe('.refine()', () => {
+    it('passes when refinement returns true', () => {
+      const s = tm.number().refine(v => v > 0, 'Must be positive');
+      const r = s.validate(5);
+      assert.strictEqual(r.valid, true);
+    });
+
+    it('fails when refinement returns false', () => {
+      const s = tm.number().refine(v => v > 0, 'Must be positive');
+      const r = s.validate(-1);
+      assert.strictEqual(r.valid, false);
+      assert.ok(r.errors[0].message.includes('Must be positive'));
+    });
+
+    it('chains multiple refinements', () => {
+      const s = tm.number()
+        .refine(v => v > 0, 'Must be positive')
+        .refine(v => v < 100, 'Must be less than 100');
+      assert.strictEqual(s.validate(50).valid, true);
+      assert.strictEqual(s.validate(-1).valid, false);
+      assert.strictEqual(s.validate(200).valid, false);
+    });
+
+    it('works with object message format', () => {
+      const s = tm.string().refine(v => v.includes('@'), { message: 'Must be an email' });
+      const r = s.validate('notanemail');
+      assert.strictEqual(r.valid, false);
+      assert.ok(r.errors[0].message.includes('Must be an email'));
+    });
+
+    it('refine runs after transform', () => {
+      const s = tm.string()
+        .transform(v => v.trim())
+        .refine(v => v.length > 0, 'Cannot be empty');
+      assert.strictEqual(s.validate('  hello  ').valid, true);
+      assert.strictEqual(s.validate('   ').valid, false);
+    });
+  });
+
+  describe('.preprocess()', () => {
+    it('preprocesses value before validation', () => {
+      const s = tm.number().preprocess(v => typeof v === 'string' ? parseInt(v, 10) : v);
+      const r = s.validate('42');
+      assert.strictEqual(r.valid, true);
+      assert.strictEqual(r.value, 42);
+    });
+
+    it('chains multiple preprocessors', () => {
+      const s = tm.string()
+        .preprocess(v => v == null ? '' : v)
+        .preprocess(v => String(v).trim());
+      const r = s.validate(null);
+      assert.strictEqual(r.valid, true);
+      assert.strictEqual(r.value, '');
+    });
+
+    it('preprocessor runs before type checking', () => {
+      const s = tm.string().preprocess(v => JSON.stringify(v));
+      const r = s.validate({ a: 1 });
+      assert.strictEqual(r.valid, true);
+      assert.strictEqual(r.value, '{"a":1}');
+    });
+  });
+
+  describe('.message()', () => {
+    it('overrides default error message', () => {
+      const s = tm.number().message('Please provide a valid number');
+      const r = s.validate('abc');
+      assert.strictEqual(r.valid, false);
+      assert.strictEqual(r.errors[0].message, 'Please provide a valid number');
+    });
+
+    it('overrides message for missing required field', () => {
+      const s = tm.string().message('Name is required');
+      const r = s.validate(undefined);
+      assert.strictEqual(r.valid, false);
+      assert.strictEqual(r.errors[0].message, 'Name is required');
+    });
+
+    it('does not affect valid results', () => {
+      const s = tm.string().message('Custom error');
+      const r = s.validate('hello');
+      assert.strictEqual(r.valid, true);
+    });
+  });
+
   // ── Complex nested validation ──
 
   describe('complex nested schemas', () => {

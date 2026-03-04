@@ -34,31 +34,89 @@ class Schema {
   min(n) { return new Schema(this._type, { ...this._opts, min: n }); }
   /** Maximum value/length constraint */
   max(n) { return new Schema(this._type, { ...this._opts, max: n }); }
+  /** Custom error message for validation failures */
+  message(msg) { return new Schema(this._type, { ...this._opts, message: msg }); }
+  /** Transform the value after validation succeeds */
+  transform(fn) {
+    const transforms = [...(this._opts.transforms || []), fn];
+    return new Schema(this._type, { ...this._opts, transforms });
+  }
+  /** Add a custom refinement check that runs after validation */
+  refine(fn, messageOrOpts) {
+    const msg = typeof messageOrOpts === 'string' ? messageOrOpts : messageOrOpts?.message || 'Refinement failed';
+    const refinements = [...(this._opts.refinements || []), { fn, message: msg }];
+    return new Schema(this._type, { ...this._opts, refinements });
+  }
+  /** Preprocess the raw value before type validation */
+  preprocess(fn) {
+    const preprocessors = [...(this._opts.preprocessors || []), fn];
+    return new Schema(this._type, { ...this._opts, preprocessors });
+  }
 
   validate(value, path = '') {
     const errors = [];
 
+    // Run preprocessors before anything else
+    let v = value;
+    if (this._opts.preprocessors) {
+      for (const fn of this._opts.preprocessors) {
+        v = fn(v);
+      }
+    }
+
     // 'any' type accepts everything including null/undefined
-    if (this._type === 'any') return { valid: true, value, errors: [] };
+    if (this._type === 'any') return this._applyPostValidation({ valid: true, value: v, errors: [] }, path);
 
     // Handle missing/null
-    if (value === undefined || value === null) {
-      if (value === null && this._opts.nullable) return { valid: true, value: null, errors: [] };
-      if (!this._opts.required) return { valid: true, value: this._opts.defaultValue ?? value, errors: [] };
-      if ('defaultValue' in this._opts) return { valid: true, value: this._opts.defaultValue, errors: [] };
-      return { valid: false, value, errors: [{ path: path || 'root', message: `Expected ${this._type}, got ${value === null ? 'null' : 'undefined'}`, expected: this._type }] };
+    if (v === undefined || v === null) {
+      if (v === null && this._opts.nullable) return this._applyPostValidation({ valid: true, value: null, errors: [] }, path);
+      if (!this._opts.required) return this._applyPostValidation({ valid: true, value: this._opts.defaultValue ?? v, errors: [] }, path);
+      if ('defaultValue' in this._opts) return this._applyPostValidation({ valid: true, value: this._opts.defaultValue, errors: [] }, path);
+      return { valid: false, value: v, errors: [{ path: path || 'root', message: this._opts.message || `Expected ${this._type}, got ${v === null ? 'null' : 'undefined'}`, expected: this._type }] };
     }
 
+    let result;
     switch (this._type) {
-      case 'string': return this._validateString(value, path);
-      case 'number': return this._validateNumber(value, path);
-      case 'boolean': return this._validateBoolean(value, path);
-      case 'array': return this._validateArray(value, path);
-      case 'object': return this._validateObject(value, path);
-      case 'enum': return this._validateEnum(value, path);
-      case 'any': return { valid: true, value, errors: [] };
-      default: return { valid: true, value, errors: [] };
+      case 'string': result = this._validateString(v, path); break;
+      case 'number': result = this._validateNumber(v, path); break;
+      case 'boolean': result = this._validateBoolean(v, path); break;
+      case 'array': result = this._validateArray(v, path); break;
+      case 'object': result = this._validateObject(v, path); break;
+      case 'enum': result = this._validateEnum(v, path); break;
+      case 'any': result = { valid: true, value: v, errors: [] }; break;
+      default: result = { valid: true, value: v, errors: [] };
     }
+
+    // Apply custom error message if validation failed
+    if (!result.valid && this._opts.message) {
+      result.errors = result.errors.map(e => ({ ...e, message: this._opts.message }));
+    }
+
+    return this._applyPostValidation(result, path);
+  }
+
+  /** Apply transforms and refinements after core validation */
+  _applyPostValidation(result, path) {
+    if (!result.valid) return result;
+
+    // Run transforms
+    let value = result.value;
+    if (this._opts.transforms) {
+      for (const fn of this._opts.transforms) {
+        value = fn(value);
+      }
+    }
+
+    // Run refinements
+    if (this._opts.refinements) {
+      for (const { fn, message } of this._opts.refinements) {
+        if (!fn(value)) {
+          return { valid: false, value, errors: [{ path: path || 'root', message, expected: this._type }] };
+        }
+      }
+    }
+
+    return { valid: true, value, errors: [] };
   }
 
   _validateString(value, path) {

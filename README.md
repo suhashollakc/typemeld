@@ -4,11 +4,12 @@
   <img src="https://img.shields.io/github/stars/suhashollakc/typemeld?style=flat-square&color=yellow" alt="stars">
   <img src="https://img.shields.io/badge/dependencies-0-green?style=flat-square" alt="dependencies">
   <img src="https://img.shields.io/badge/size-~3KB-orange?style=flat-square" alt="size">
+  <img src="https://img.shields.io/badge/tests-222%20passing-brightgreen?style=flat-square" alt="tests">
 </p>
 
 <h1 align="center">typemeld</h1>
 <p align="center"><strong>Parse, validate, and repair messy LLM outputs into clean, typed data.</strong></p>
-<p align="center"><sub>Like zod, but for AI. Zero dependencies. TypeScript-ready. ~3KB gzipped.</sub></p>
+<p align="center"><sub>Like zod, but for AI. Zero dependencies. TypeScript-ready. Streaming support. ~3KB gzipped.</sub></p>
 
 ---
 
@@ -183,6 +184,12 @@ tm.object({ ... })                       // strips extra keys (default)
 tm.object({ ... }).passthrough()         // keeps extra keys
 tm.object({ ... }).strict()              // rejects extra keys
 
+// Transforms & refinements
+tm.string().transform(s => s.trim().toLowerCase())
+tm.number().refine(n => n > 0, 'Must be positive')
+tm.string().preprocess(v => v ?? '')     // runs before validation
+tm.string().message('Name is required')  // custom error messages
+
 // Nested
 tm.object({
   user: tm.object({
@@ -220,32 +227,292 @@ parse('{"mood": "Positive"}', tm.object({ mood: tm.enum(['positive', 'negative']
 // => { mood: "positive" }
 ```
 
-## Real-world example
+## Streaming
+
+Parse JSON as it streams from an LLM. Works with OpenAI, Anthropic, Google, and any SSE-based API.
+
+### `JsonStream` — Incremental parser
 
 ```javascript
-import Anthropic from '@anthropic-ai/sdk';
-import { parse, tm, promptFor } from 'typemeld';
+import { JsonStream, tm } from 'typemeld';
 
 const schema = tm.object({
   sentiment: tm.enum(['positive', 'negative', 'neutral']),
   confidence: tm.number(),
+});
+
+const stream = new JsonStream(schema);
+
+// Push chunks as they arrive from the LLM
+stream.push('{"sentiment":');
+stream.push(' "positive",');
+stream.push(' "confidence": 0.95}');
+
+console.log(stream.value); // partial result available at any time
+const final = stream.complete(); // validates against schema
+// => { sentiment: "positive", confidence: 0.95 }
+```
+
+### `streamParse()` — Process async iterables
+
+```javascript
+import { streamParse, tm } from 'typemeld';
+
+// With OpenAI
+const completion = await openai.chat.completions.create({
+  model: 'gpt-4o-mini',
+  stream: true,
+  messages: [{ role: 'user', content: 'Analyze this text...' }],
+});
+
+const schema = tm.object({
+  sentiment: tm.enum(['positive', 'negative', 'neutral']),
   topics: tm.array(tm.string()),
+});
+
+for await (const { partial, done } of streamParse(
+  (async function*() {
+    for await (const chunk of completion) {
+      yield chunk.choices[0]?.delta?.content ?? '';
+    }
+  })(),
+  schema
+)) {
+  console.log(partial); // progressively more complete object
+  if (done) console.log('Final validated result:', partial);
+}
+```
+
+### `parseStream()` — Simple async completion
+
+```javascript
+import { parseStream, tm } from 'typemeld';
+
+// Buffer all chunks and return final validated result
+const result = await parseStream(
+  (async function*() {
+    for await (const chunk of anthropicStream) {
+      yield chunk.delta?.text ?? '';
+    }
+  })(),
+  schema
+);
+```
+
+## Zod Adapter
+
+Already using Zod? Use your existing schemas with typemeld's repair engine:
+
+```javascript
+import { z } from 'zod';
+import { fromZod, parse } from 'typemeld';
+
+// Your existing Zod schema
+const zodSchema = z.object({
+  name: z.string().min(1),
+  age: z.number().min(0).max(150),
+  role: z.enum(['admin', 'user', 'guest']),
+  tags: z.array(z.string()).optional(),
+});
+
+// Convert to typemeld and parse messy LLM output
+const tmSchema = fromZod(zodSchema);
+const result = parse(messyLlmOutput, tmSchema);
+// typemeld repairs the JSON, then validates with your Zod-equivalent schema
+```
+
+The adapter supports: `string`, `number`, `boolean`, `array`, `object`, `enum`, `literal`, `union`, `optional`, `nullable`, `default`, `describe`, `min/max`, `passthrough`, `strict`, and more.
+
+## Retry Wrapper
+
+Automatically re-prompt the LLM when validation fails:
+
+```javascript
+import { withRetry, tm } from 'typemeld';
+import OpenAI from 'openai';
+
+const openai = new OpenAI();
+const schema = tm.object({
+  entities: tm.array(tm.object({
+    name: tm.string(),
+    type: tm.enum(['person', 'org', 'location']),
+    confidence: tm.number().min(0).max(1),
+  })).min(1),
+});
+
+const result = await withRetry({
+  schema,
+  maxRetries: 3,
+  call: (messages) => openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages,
+  }),
+  extract: (res) => res.choices[0].message.content,
+  prompt: 'Extract all entities from: "Tim Cook announced Apple\'s new product in Cupertino"',
+  onRetry: (attempt, errors) => console.log(`Retry ${attempt}:`, errors),
+});
+// If the LLM returns invalid output, typemeld re-prompts with error details
+// => { entities: [{ name: "Tim Cook", type: "person", confidence: 0.98 }, ...] }
+```
+
+### With Anthropic
+
+```javascript
+import Anthropic from '@anthropic-ai/sdk';
+import { withRetry, tm } from 'typemeld';
+
+const anthropic = new Anthropic();
+
+const result = await withRetry({
+  schema: tm.object({
+    summary: tm.string().min(10).max(200),
+    keywords: tm.array(tm.string()).min(3),
+    sentiment: tm.enum(['positive', 'negative', 'neutral']),
+  }),
+  call: (messages) => anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    system: messages.find(m => m.role === 'system')?.content,
+    messages: messages.filter(m => m.role !== 'system'),
+  }),
+  extract: (res) => res.content[0].text,
+  prompt: `Summarize and analyze this article: "${articleText}"`,
+});
+```
+
+## Real-world examples
+
+### Sentiment analysis
+
+```javascript
+const sentiment = parse(llmOutput, tm.object({
+  sentiment: tm.enum(['positive', 'negative', 'neutral', 'mixed']),
+  confidence: tm.number().min(0).max(1),
+  reasoning: tm.string().optional(),
+}));
+```
+
+### Entity extraction
+
+```javascript
+const entities = parse(llmOutput, tm.object({
+  entities: tm.array(tm.object({
+    text: tm.string(),
+    type: tm.enum(['person', 'organization', 'location', 'date', 'money']),
+    start: tm.number().optional(),
+    end: tm.number().optional(),
+  })),
+}));
+```
+
+### Product listing
+
+```javascript
+const product = parse(llmOutput, tm.object({
+  name: tm.string().min(1),
+  price: tm.number().min(0),
+  currency: tm.enum(['USD', 'EUR', 'GBP']).default('USD'),
+  inStock: tm.boolean().default(true),
+  tags: tm.array(tm.string()),
+  description: tm.string().max(500),
+}));
+```
+
+### Code review
+
+```javascript
+const review = parse(llmOutput, tm.object({
+  issues: tm.array(tm.object({
+    severity: tm.enum(['critical', 'warning', 'info']),
+    line: tm.number().optional(),
+    message: tm.string(),
+    suggestion: tm.string().optional(),
+  })),
+  overall: tm.enum(['approve', 'request_changes', 'comment']),
   summary: tm.string(),
-});
+}));
+```
 
-const client = new Anthropic();
-const response = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
-  max_tokens: 1024,
-  system: `You are a text analyzer.\n${promptFor(schema, { strict: true })}`,
-  messages: [{ role: 'user', content: `Analyze: "${articleText}"` }],
-});
+### Translation
 
-// This just works — even if Claude wraps it in fences or adds commentary
-const analysis = parse(response.content[0].text, schema);
-console.log(analysis.sentiment);  // "positive"
-console.log(analysis.confidence); // 0.92
-console.log(analysis.topics);     // ["technology", "innovation"]
+```javascript
+const translation = parse(llmOutput, tm.object({
+  original: tm.string(),
+  translated: tm.string(),
+  language: tm.string(),
+  confidence: tm.number().min(0).max(1),
+  alternatives: tm.array(tm.string()).optional(),
+}));
+```
+
+### Classification
+
+```javascript
+const classification = parse(llmOutput, tm.object({
+  category: tm.enum(['bug', 'feature', 'question', 'docs']),
+  priority: tm.enum(['low', 'medium', 'high', 'critical']),
+  labels: tm.array(tm.string()),
+  assignee: tm.string().optional(),
+}));
+```
+
+### Structured data extraction from documents
+
+```javascript
+const invoice = parse(llmOutput, tm.object({
+  vendor: tm.string(),
+  invoiceNumber: tm.string(),
+  date: tm.string().transform(s => new Date(s)),
+  items: tm.array(tm.object({
+    description: tm.string(),
+    quantity: tm.number().min(1),
+    unitPrice: tm.number().min(0),
+  })),
+  total: tm.number().min(0),
+  currency: tm.enum(['USD', 'EUR', 'GBP', 'JPY']).default('USD'),
+}));
+```
+
+### Multi-step agent output
+
+```javascript
+const agentStep = parse(llmOutput, tm.object({
+  thought: tm.string(),
+  action: tm.enum(['search', 'calculate', 'respond', 'ask_user']),
+  actionInput: tm.string().optional(),
+  observation: tm.string().optional(),
+  finalAnswer: tm.string().optional(),
+}).passthrough()); // keep any extra fields the LLM adds
+```
+
+### With transforms and refinements
+
+```javascript
+const userProfile = parse(llmOutput, tm.object({
+  email: tm.string()
+    .transform(s => s.trim().toLowerCase())
+    .refine(s => s.includes('@'), 'Must be a valid email'),
+  age: tm.number()
+    .min(0).max(150)
+    .refine(n => Number.isInteger(n), 'Age must be a whole number'),
+  bio: tm.string()
+    .transform(s => s.trim())
+    .refine(s => s.length > 0, 'Bio cannot be empty'),
+  website: tm.string().optional()
+    .transform(s => s?.startsWith('http') ? s : `https://${s}`),
+}));
+```
+
+### With preprocessing
+
+```javascript
+const config = parse(llmOutput, tm.object({
+  temperature: tm.number()
+    .preprocess(v => typeof v === 'string' ? parseFloat(v) : v)
+    .min(0).max(2),
+  model: tm.string()
+    .preprocess(v => typeof v === 'string' ? v.trim() : String(v)),
+}));
 ```
 
 ## Why not just use zod?
@@ -257,18 +524,23 @@ zod is excellent for general validation. typemeld is purpose-built for LLM outpu
 | JSON repair (fences, commas, quotes) | &#x274C; | &#x2705; |
 | Extract JSON from prose | &#x274C; | &#x2705; |
 | Fix truncated JSON | &#x274C; | &#x2705; |
+| Streaming JSON parser | &#x274C; | &#x2705; |
+| LLM retry wrapper | &#x274C; | &#x2705; |
+| Zod schema adapter | N/A | &#x2705; |
 | Smart type coercion | Partial | &#x2705; Full |
 | Single value &rarr; array coercion | &#x274C; | &#x2705; |
 | Case-insensitive enum matching | &#x274C; | &#x2705; |
 | Multiple JSON extraction | &#x274C; | &#x2705; |
 | LLM prompt generation | &#x274C; | &#x2705; |
+| Transform / refine / preprocess | &#x2705; | &#x2705; |
+| Custom error messages | &#x2705; | &#x2705; |
 | Min/max constraints | &#x2705; | &#x2705; |
 | passthrough / strict modes | &#x2705; | &#x2705; |
 | TypeScript types | &#x2705; Built-in | &#x2705; Built-in |
 | Zero dependencies | &#x274C; (standalone) | &#x2705; |
 | Bundle size | ~14KB | ~3KB |
 
-Use zod for form validation. Use typemeld for LLM outputs. Or use both together.
+Use zod for form validation. Use typemeld for LLM outputs. Or use both together with `fromZod()`.
 
 ## TypeScript
 
@@ -294,11 +566,10 @@ const result: SafeParseResult<User> = safeParse(llmOutput, userSchema);
 
 Contributions welcome! High-impact areas:
 
-- More LLM output edge cases
-- Streaming JSON support (parse partial chunks)
-- zod adapter (`tm.fromZod(zodSchema)`)
-- Retry wrapper (re-prompt LLM on validation failure)
+- More LLM output edge cases and repair strategies
+- Integration guides for popular frameworks (LangChain, Vercel AI SDK, AutoGPT)
 - XML/YAML repair modes
+- Performance benchmarks
 
 ```bash
 git clone https://github.com/suhashollakc/typemeld.git
